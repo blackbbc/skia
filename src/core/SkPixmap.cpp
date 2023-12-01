@@ -23,6 +23,8 @@
 #include "src/core/SkReadPixelsRec.h"
 #include "src/core/SkSwizzlePriv.h"
 #include "src/opts/SkMemset_opts.h"
+#include "src/core/SkDraw.h"
+#include "src/core/SkRasterClip.h"
 
 #include <cstdint>
 #include <cstring>
@@ -727,58 +729,83 @@ bool SkPixmap::erase(const SkColor4f& color, const SkIRect* subset) const {
 
     SkIRect clip = this->bounds();
     if (subset && !clip.intersect(*subset)) {
-        return false;   // is this check really needed (i.e. to return false in this case?)
-    }
-
-    // Erase is meant to simulate drawing in kSRC mode -- which means we have to convert out
-    // unpremul input into premul (which we always do when we draw).
-    const auto c = color.premul();
-
-    const auto dst = SkImageInfo::Make(1, 1, this->colorType(), this->alphaType(),
-                                       sk_ref_sp(this->colorSpace()));
-    const auto src = SkImageInfo::Make(1, 1, kRGBA_F32_SkColorType, kPremul_SkAlphaType, nullptr);
-
-    uint64_t dstPixel[2] = {};   // be large enough for our widest config (F32 x 4)
-    SkASSERT((size_t)dst.bytesPerPixel() <= sizeof(dstPixel));
-
-    if (!SkConvertPixels(dst, dstPixel, sizeof(dstPixel), src, &c, sizeof(c))) {
         return false;
     }
 
-    if (this->colorType() == kRGBA_F32_SkColorType) {
-        SkColor4f dstColor;
-        memcpy(&dstColor, dstPixel, sizeof(dstColor));
-        for (int y = clip.fTop; y < clip.fBottom; ++y) {
-            SkColor4f* addr = (SkColor4f*)this->writable_addr(clip.fLeft, y);
-            SK_OPTS_NS::memsetT(addr, dstColor, clip.width());
-        }
-    } else {
-        using MemSet = void(*)(void*, uint64_t c, int count);
-        const MemSet procs[] = {
-            [](void* addr, uint64_t c, int count) {
-                SkASSERT(c == (uint8_t)c);
-                SK_OPTS_NS::memsetT((uint8_t*)addr, (uint8_t)c, count);
-            },
-            [](void* addr, uint64_t c, int count) {
-                SkASSERT(c == (uint16_t)c);
-                SK_OPTS_NS::memsetT((uint16_t*)addr, (uint16_t)c, count);
-            },
-            [](void* addr, uint64_t c, int count) {
-                SkASSERT(c == (uint32_t)c);
-                SK_OPTS_NS::memsetT((uint32_t*)addr, (uint32_t)c, count);
-            },
-            [](void* addr, uint64_t c, int count) {
-                SK_OPTS_NS::memsetT((uint64_t*)addr, c, count);
-            },
-        };
+    SkPaint paint;
+    paint.setBlendMode(SkBlendMode::kSrc);
+    paint.setColor4f(color, this->colorSpace());
 
-        unsigned shift = SkColorTypeShiftPerPixel(this->colorType());
-        SkASSERT(shift < std::size(procs));
-        auto proc = procs[shift];
+    SkRasterClip rc(clip);
 
-        for (int y = clip.fTop; y < clip.fBottom; ++y) {
-            proc(this->writable_addr(clip.fLeft, y), dstPixel[0], clip.width());
-        }
-    }
+    SkDraw draw;
+    draw.fDst            = *this;
+    draw.fCTM = &SkMatrix::I();
+    draw.fRC             = &rc;
+
+    draw.drawPaint(paint);
     return true;
 }
+
+// bool SkPixmap::erase(const SkColor4f& color, const SkIRect* subset) const {
+//     if (this->colorType() == kUnknown_SkColorType) {
+//         return false;
+//     }
+
+//     SkIRect clip = this->bounds();
+//     if (subset && !clip.intersect(*subset)) {
+//         return false;   // is this check really needed (i.e. to return false in this case?)
+//     }
+
+//     // Erase is meant to simulate drawing in kSRC mode -- which means we have to convert out
+//     // unpremul input into premul (which we always do when we draw).
+//     const auto c = color.premul();
+
+//     const auto dst = SkImageInfo::Make(1, 1, this->colorType(), this->alphaType(),
+//                                        sk_ref_sp(this->colorSpace()));
+//     const auto src = SkImageInfo::Make(1, 1, kRGBA_F32_SkColorType, kPremul_SkAlphaType, nullptr);
+
+//     uint64_t dstPixel[2] = {};   // be large enough for our widest config (F32 x 4)
+//     SkASSERT((size_t)dst.bytesPerPixel() <= sizeof(dstPixel));
+
+//     if (!SkConvertPixels(dst, dstPixel, sizeof(dstPixel), src, &c, sizeof(c))) {
+//         return false;
+//     }
+
+//     if (this->colorType() == kRGBA_F32_SkColorType) {
+//         SkColor4f dstColor;
+//         memcpy(&dstColor, dstPixel, sizeof(dstColor));
+//         for (int y = clip.fTop; y < clip.fBottom; ++y) {
+//             SkColor4f* addr = (SkColor4f*)this->writable_addr(clip.fLeft, y);
+//             SK_OPTS_NS::memsetT(addr, dstColor, clip.width());
+//         }
+//     } else {
+//         using MemSet = void(*)(void*, uint64_t c, int count);
+//         const MemSet procs[] = {
+//             [](void* addr, uint64_t c, int count) {
+//                 SkASSERT(c == (uint8_t)c);
+//                 SK_OPTS_NS::memsetT((uint8_t*)addr, (uint8_t)c, count);
+//             },
+//             [](void* addr, uint64_t c, int count) {
+//                 SkASSERT(c == (uint16_t)c);
+//                 SK_OPTS_NS::memsetT((uint16_t*)addr, (uint16_t)c, count);
+//             },
+//             [](void* addr, uint64_t c, int count) {
+//                 SkASSERT(c == (uint32_t)c);
+//                 SK_OPTS_NS::memsetT((uint32_t*)addr, (uint32_t)c, count);
+//             },
+//             [](void* addr, uint64_t c, int count) {
+//                 SK_OPTS_NS::memsetT((uint64_t*)addr, c, count);
+//             },
+//         };
+
+//         unsigned shift = SkColorTypeShiftPerPixel(this->colorType());
+//         SkASSERT(shift < std::size(procs));
+//         auto proc = procs[shift];
+
+//         for (int y = clip.fTop; y < clip.fBottom; ++y) {
+//             proc(this->writable_addr(clip.fLeft, y), dstPixel[0], clip.width());
+//         }
+//     }
+//     return true;
+// }

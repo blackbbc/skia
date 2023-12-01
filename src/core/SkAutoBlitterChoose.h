@@ -35,13 +35,20 @@ public:
     SkBlitter* choose(const SkDrawBase& draw, const SkMatrix* ctm,
                       const SkPaint& paint, bool drawCoverage = false) {
         SkASSERT(!fBlitter);
-        fBlitter = draw.fBlitterChooser(draw.fDst,
-                                        ctm ? *ctm : *draw.fCTM,
-                                        paint,
-                                        &fAlloc,
-                                        drawCoverage,
-                                        draw.fRC->clipShader(),
-                                        SkSurfacePropsCopyOrDefault(draw.fProps));
+        fBlitter = SkBlitter::Choose(draw.fDst,
+                                     ctm ? *ctm : *draw.fCTM,
+                                     paint,
+                                     &fAlloc,
+                                     drawCoverage,
+                                     draw.fRC->clipShader(),
+                                     SkSurfacePropsCopyOrDefault(draw.fProps));
+        // fBlitter = draw.fBlitterChooser(draw.fDst,
+        //                                 ctm ? *ctm : *draw.fCTM,
+        //                                 paint,
+        //                                 &fAlloc,
+        //                                 drawCoverage,
+        //                                 draw.fRC->clipShader(),
+        //                                 SkSurfacePropsCopyOrDefault(draw.fProps));
         return fBlitter;
     }
 
